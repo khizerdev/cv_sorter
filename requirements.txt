@@ -6,3 +6,5 @@ pymupdf
 python-docx
 mammoth
 python-multipart
+groq
+pydantic

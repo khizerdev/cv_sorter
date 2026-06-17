@@ -5,6 +5,8 @@ from models import Candidate
 from services.extractor import extract_text
 import os
 import shutil
+import json
+from services.groq_extractor import extract_structured_data
 
 router = APIRouter(prefix="/api", tags=["upload"])
 
@@ -72,3 +74,60 @@ def list_candidates(db: Session = Depends(get_db)):
         }
         for c in candidates
     ]
+
+@router.post("/process/{candidate_id}")
+def process_candidate(candidate_id: int, db: Session = Depends(get_db)):
+    """
+    Takes a candidate's raw_text, sends it to Groq,
+    and updates the record with structured data.
+    """
+    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
+
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
+    try:
+        profile = extract_structured_data(candidate.raw_text)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Groq extraction failed: {str(e)}")
+
+    # Update the candidate record with structured fields
+    candidate.name = profile.name
+    candidate.email = profile.email
+    candidate.phone = profile.phone
+    candidate.skills = json.dumps(profile.skills)  # list -> JSON string
+    candidate.years_experience = profile.years_experience
+    candidate.education = profile.education
+    candidate.current_role = profile.current_role
+    candidate.summary = profile.summary
+    candidate.is_processed = 1
+
+    db.commit()
+    db.refresh(candidate)
+
+    return {
+        "message": "Candidate processed successfully",
+        "candidate_id": candidate.id,
+        "profile": profile.model_dump()
+    }
+
+
+@router.get("/candidates/{candidate_id}")
+def get_candidate(candidate_id: int, db: Session = Depends(get_db)):
+    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
+    return {
+        "id": candidate.id,
+        "filename": candidate.filename,
+        "name": candidate.name,
+        "email": candidate.email,
+        "phone": candidate.phone,
+        "skills": json.loads(candidate.skills) if candidate.skills else [],
+        "years_experience": candidate.years_experience,
+        "education": candidate.education,
+        "current_role": candidate.current_role,
+        "summary": candidate.summary,
+        "is_processed": bool(candidate.is_processed)
+    }
