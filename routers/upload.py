@@ -7,6 +7,7 @@ import os
 import shutil
 import json
 from services.groq_extractor import extract_structured_data
+from services.vector_store import upsert_candidate, search_candidates
 
 router = APIRouter(prefix="/api", tags=["upload"])
 
@@ -77,10 +78,6 @@ def list_candidates(db: Session = Depends(get_db)):
 
 @router.post("/process/{candidate_id}")
 def process_candidate(candidate_id: int, db: Session = Depends(get_db)):
-    """
-    Takes a candidate's raw_text, sends it to Groq,
-    and updates the record with structured data.
-    """
     candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
 
     if not candidate:
@@ -91,11 +88,10 @@ def process_candidate(candidate_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Groq extraction failed: {str(e)}")
 
-    # Update the candidate record with structured fields
     candidate.name = profile.name
     candidate.email = profile.email
     candidate.phone = profile.phone
-    candidate.skills = json.dumps(profile.skills)  # list -> JSON string
+    candidate.skills = json.dumps(profile.skills)
     candidate.years_experience = profile.years_experience
     candidate.education = profile.education
     candidate.current_role = profile.current_role
@@ -105,12 +101,30 @@ def process_candidate(candidate_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(candidate)
 
+    # NEW: push to ChromaDB now that structured fields are ready
+    upsert_candidate(candidate)
+
     return {
-        "message": "Candidate processed successfully",
+        "message": "Candidate processed and indexed successfully",
         "candidate_id": candidate.id,
         "profile": profile.model_dump()
     }
 
+
+@router.post("/search")
+def search_by_job_description(job_description: str, top_n: int = 5):
+    """
+    The core 'sorting' feature: paste a job description,
+    get back ranked candidates by semantic similarity.
+    """
+    if not job_description.strip():
+        raise HTTPException(status_code=400, detail="Job description cannot be empty")
+
+    matches = search_candidates(job_description, top_n)
+    return {
+        "job_description": job_description,
+        "matches": matches
+    }
 
 @router.get("/candidates/{candidate_id}")
 def get_candidate(candidate_id: int, db: Session = Depends(get_db)):
