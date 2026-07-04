@@ -10,3 +10,6 @@ groq
 pydantic
 sentence-transformers
 chromadb
+langchain
+langchain-groq
+langgraph

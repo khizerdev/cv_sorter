@@ -8,6 +8,7 @@ import shutil
 import json
 from services.groq_extractor import extract_structured_data
 from services.vector_store import upsert_candidate, search_candidates
+from services.scoring_agent import run_agent
 
 router = APIRouter(prefix="/api", tags=["upload"])
 
@@ -145,3 +146,23 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db)):
         "summary": candidate.summary,
         "is_processed": bool(candidate.is_processed)
     }
+
+@router.post("/rank")
+def rank_candidates(job_description: str, top_n: int = 5):
+    """
+    The full agent pipeline:
+    retrieve → score → route → summarize.
+    Returns shortlisted candidates + a hiring report.
+    """
+    if not job_description.strip():
+        raise HTTPException(status_code=400, detail="Job description cannot be empty")
+
+    if top_n < 1 or top_n > 20:
+        raise HTTPException(status_code=400, detail="top_n must be between 1 and 20")
+
+    try:
+        result = run_agent(job_description, top_n)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Agent failed: {str(e)}")
+
+    return result
