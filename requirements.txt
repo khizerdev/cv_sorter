@@ -13,3 +13,5 @@ chromadb
 langchain
 langchain-groq
 langgraph
+gspread
+google-auth
